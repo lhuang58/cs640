@@ -15,9 +15,13 @@ class Router(object):
     def __init__(self, net):
         self.net = net
         # other initialization stuff here
+        self.interfaces = self.net.interfaces()
+        self.ipmap = {}
+        for intf in self.interfaces:
+            self.ipmap[str(intf.ipaddr)] = intf
+        print(self.ipmap)
 
-
-    def router_main(self):    
+    def router_main(self):
         '''
         Main method for router; we stay in a loop in this method, receiving
         packets until the end of time.
@@ -26,6 +30,10 @@ class Router(object):
             gotpkt = True
             try:
                 dev,pkt = self.net.recv_packet(timeout=1.0)
+                arp = pkt.get_header(Arp)
+                print("<------->")
+                print(arp)
+
             except NoPackets:
                 log_debug("No packets available in recv_packet")
                 gotpkt = False
@@ -36,8 +44,10 @@ class Router(object):
             if gotpkt:
                 log_debug("Got a packet: {}".format(str(pkt)))
 
-
-
+            if self.interfaces.interface_by_name() is not None:
+                requestIntf = self.ipmap[str(arp.targetprotoaddr)]
+                arpReply = create_ip_arp_reply(requestIntf.ethaddr, arp.senderhwaddr, requestIntf.ipaddr, arp.senderprotoaddr)
+                self.net.send_packet(requestIntf.name, arpReply)
 def switchy_main(net):
     '''
     Main entry point for router.  Just create Router
