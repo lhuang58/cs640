@@ -21,6 +21,7 @@ class Router(object):
         packets until the end of time.
         '''
         interfaces = self.net.interfaces()
+        dstIpMap = {}
         ipmap = {}
         for intf in interfaces:
             ipmap[str(intf.ipaddr)] = intf
@@ -44,6 +45,10 @@ class Router(object):
             if arp is not None:
                 if ipmap[str(arp.targetprotoaddr)] is not None:
                     requestIntf = ipmap[str(arp.targetprotoaddr)]
+                    '''
+                    store dst IP/Ethernet map
+                    '''
+                    dstIpMap[str(arp.targetprotoaddr)] = requestIntf.ethaddr
                     arpReply = create_ip_arp_reply(requestIntf.ethaddr, arp.senderhwaddr, requestIntf.ipaddr, arp.senderprotoaddr)
                     self.net.send_packet(requestIntf.name, arpReply)
 def switchy_main(net):
