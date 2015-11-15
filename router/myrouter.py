@@ -21,17 +21,32 @@ class Router(object):
         packets until the end of time.
         '''
         interfaces = self.net.interfaces()
-        dstIpMap = {}
-        ipmap = {}
+        pktsQueue = []
+        forwardingTable = []
+        f = open('forwarding_table.txt', 'r')
+        # Build the forwarding table from file
+        for line in f:
+            temp = line.strip().split(' ')
+            forwardingTable.append(temp)
+        f.close()
+
+        etherIpMap = {} # ethernet/IP mapping
+        ipIntfMap = {} # ip/interfaces mapping
+
+        # Build the forwarding table from interfaces
         for intf in interfaces:
-            ipmap[str(intf.ipaddr)] = intf
+            print(intf)
+            ipIntfMap[str(intf.ipaddr)] = intf
+            networkPrefix = IPv4Address(int(intf.ipaddr) & int(intf.netmask))
+            forwardingTable.append([str(networkPrefix), str(intf.netmask), str(intf.ipaddr), intf.name])
+        #for entry in forwardingTable:
+            #print(entry)
+
         while True:
             gotpkt = True
             try:
                 dev,pkt = self.net.recv_packet(timeout=1.0)
                 arp = pkt.get_header(Arp)
-                print("<------->")
-                print(arp)
 
             except NoPackets:
                 log_debug("No packets available in recv_packet")
@@ -42,15 +57,55 @@ class Router(object):
 
             if gotpkt:
                 log_debug("Got a packet: {}".format(str(pkt)))
-            if arp is not None:
-                if ipmap[str(arp.targetprotoaddr)] is not None:
-                    requestIntf = ipmap[str(arp.targetprotoaddr)]
-                    '''
-                    store dst IP/Ethernet map
-                    '''
-                    dstIpMap[str(arp.targetprotoaddr)] = requestIntf.ethaddr
-                    arpReply = create_ip_arp_reply(requestIntf.ethaddr, arp.senderhwaddr, requestIntf.ipaddr, arp.senderprotoaddr)
-                    self.net.send_packet(requestIntf.name, arpReply)
+
+            etherHeader = Ethernet()
+            if arp is None:
+                #add the pkt to the queue
+                pktsQueue.append(pkt)
+
+                pkt[1].ttl -= 1 # decrement TTL by 1
+                maxPrefixLen = 0
+                dstIpAddr = pkt[1].dst
+                nextHop = None
+                etherHeader.src = pkt[0].src
+                etherHeader.ethertype = EtherType.IPv4
+                # Look up forwarding table
+                for entry in forwardingTable:
+                    prefix = IPv4Address(entry[0])
+                    subnetMask = IPv4Address(entry[1])
+                    dstSubnetNumber = IPv4Address(int(dstIpAddr) & int(subnetMask))
+                    matches = (int(prefix) & int(dstSubnetNumber)) == int(prefix)
+                    tempPrefixLength = IPv4Network(str(prefix) + '/' + str(subnetMask)).prefixlen
+                    # Check prefix length
+                    if matches and tempPrefixLength > maxPrefixLen:
+                        maxPrefixLen = tempPrefixLength
+                        nextHop = entry[2]
+                if nextHop is not None and str(dstIpAddr) not in ipIntfMap.keys():
+                    # Send the ARP request to the host where IP address need to be resovled
+                    temp = ipIntfMap.get(nextHop)
+                    senderhwaddr = temp.ethaddr
+                    senderprotoaddr = temp.ipaddr
+                    request = create_ip_arp_request(senderhwaddr, senderprotoaddr, dstIpAddr)
+                    self.net.send_packet(temp.name, request)
+            else:
+                print("arp: ")
+                print(arp)
+                if arp.senderhwaddr not in etherIpMap.keys():
+                    etherHeader.dst = arp.senderhwaddr
+                    #store the sender ip/ethernet map
+                    etherIpMap[str(arp.senderprotoaddr)] = arp.senderhwaddr
+
+                if ipIntfMap[str(arp.targetprotoaddr)] is not None:
+                    pktToSend = pktsQueue.pop(0)
+                    requestIntf = ipIntfMap[str(arp.targetprotoaddr)]
+                    print(requestIntf)
+                    etherHeader.src = requestIntf.ethaddr
+                    pktToSend[0] = etherHeader
+                    # store receiver IP/Ethernet map
+                    etherIpMap[str(requestIntf.ipaddr)] = requestIntf.ethaddr
+                    #arpReply = create_ip_arp_reply(requestIntf.ethaddr, arp.senderhwaddr, requestIntf.ipaddr, arp.senderprotoaddr)
+                    self.net.send_packet(requestIntf.name, pktToSend)
+
 def switchy_main(net):
     '''
     Main entry point for router.  Just create Router
