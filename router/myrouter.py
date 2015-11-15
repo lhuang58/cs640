@@ -11,11 +11,13 @@ from switchyard.lib.packet import *
 from switchyard.lib.address import *
 from switchyard.lib.common import *
 
-class PacketInQueue(object):
-    def __init__(self, packet, time):
+class Task(object):
+    def __init__(self, packet, time, request, interfaceName):
         self.packet = packet
         self.time = time
         self.retry = 0
+        self.request = request
+        self.interfaceName = interfaceName
 
 class Router(object):
     def __init__(self, net):
@@ -27,7 +29,7 @@ class Router(object):
         packets until the end of time.
         '''
         interfaces = self.net.interfaces()
-        pktsQueue = []
+        taskQueue = []
         forwardingTable = []
         f = open('forwarding_table.txt', 'r')
         # Build the forwarding table from file
@@ -48,6 +50,16 @@ class Router(object):
 
         while True:
             gotpkt = True
+            # Check the task queue, if there is one, process the task
+            if taskQueue:
+                waiting = []
+                for task in taskQueue:
+                    if time.time() - task.time >= 1:
+                        if task.retry < 5:
+                            self.net.send_packet(task.interfaceName, task.request)
+                            task.retry += 1
+                            waiting.append(task)
+                taskQueue = waiting
             try:
                 dev,pkt = self.net.recv_packet(timeout=1.0)
                 arp = pkt.get_header(Arp)
@@ -65,8 +77,6 @@ class Router(object):
                 etherHeader = Ethernet()
                 # If the pkt is not an arp packet, then start processing the pkt
                 if arp is None:
-                    # add the pkt to the queue
-                    pktsQueue.append(PacketInQueue(pkt, time.time()))
 
                     pkt[1].ttl -= 1 # decrement TTL by 1
                     maxPrefixLen = 0
@@ -95,6 +105,10 @@ class Router(object):
                             senderprotoaddr = temp.ipaddr
                             request = create_ip_arp_request(senderhwaddr, senderprotoaddr, dstIpAddr)
                             self.net.send_packet(temp.name, request)
+                            # add a new task to the queue
+                            taskQueue.append(Task(pkt, time.time(), request, temp.name))
+                            print(time.time())
+
                 else:
                 # The pkt is an arp pkt, then complete the header and forward the ip pkt
                 # if the arp pkt is an request, then send the reply
@@ -107,7 +121,7 @@ class Router(object):
                                 etherHeader.dst = arp.senderhwaddr
                                 #store the sender ip/ethernet map
                                 etherIpMap[str(arp.senderprotoaddr)] = arp.senderhwaddr
-                            pktToSend = pktsQueue.pop(0).packet
+                            pktToSend = taskQueue.pop(0).packet
                             etherHeader.src = requestIntf.ethaddr
                             pktToSend[0] = etherHeader
                             # store receiver IP/Ethernet map
