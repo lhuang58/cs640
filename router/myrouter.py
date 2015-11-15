@@ -86,7 +86,7 @@ class Router(object):
                         maxPrefixLen = tempPrefixLength
                         nextHop = entry[2]
                 # If there is a match for this and the destination address is not
-                # one of addresses in router's interfaces, then send the request to destination host
+                # one of addresses in router's interfaces, then send the request for destination host
                 if nextHop is not None and str(dstIpAddr) not in ipIntfMap.keys():
                     # Send the ARP request to the host where IP address need to be resovled
                     temp = ipIntfMap.get(nextHop)
