@@ -11,6 +11,12 @@ from switchyard.lib.packet import *
 from switchyard.lib.address import *
 from switchyard.lib.common import *
 
+class PacketInQueue(object):
+    def __init__(self, packet, time):
+        self.packet = packet
+        self.time = time
+        self.retry = 0
+
 class Router(object):
     def __init__(self, net):
         self.net = net
@@ -39,8 +45,6 @@ class Router(object):
             ipIntfMap[str(intf.ipaddr)] = intf
             networkPrefix = IPv4Address(int(intf.ipaddr) & int(intf.netmask))
             forwardingTable.append([str(networkPrefix), str(intf.netmask), str(intf.ipaddr), intf.name])
-        #for entry in forwardingTable:
-            #print(entry)
 
         while True:
             gotpkt = True
@@ -59,17 +63,16 @@ class Router(object):
                 log_debug("Got a packet: {}".format(str(pkt)))
 
             etherHeader = Ethernet()
-            '''
-            If the packet is not a arp pkt
-            '''
+            # If the pkt is not an arp packet, then start processing the pkt
             if arp is None:
-                #add the pkt to the queue
-                pktsQueue.append(pkt)
+                # add the pkt to the queue
+                pktsQueue.append(PacketInQueue(pkt, time.time()))
 
                 pkt[1].ttl -= 1 # decrement TTL by 1
                 maxPrefixLen = 0
                 dstIpAddr = pkt[1].dst
                 nextHop = None
+                etherHeader.src = pkt[0].src
                 etherHeader.ethertype = EtherType.IPv4
                 # Look up forwarding table
                 for entry in forwardingTable:
@@ -82,8 +85,8 @@ class Router(object):
                     if matches and tempPrefixLength > maxPrefixLen:
                         maxPrefixLen = tempPrefixLength
                         nextHop = entry[2]
-                # If there is a match in the forwarding table and the destination address
-                # is not one of addresses in the router's interfaces
+                # If there is a match for this and the destination address is not
+                # one of addresses in router's interfaces, then send the request to destination host
                 if nextHop is not None and str(dstIpAddr) not in ipIntfMap.keys():
                     # Send the ARP request to the host where IP address need to be resovled
                     temp = ipIntfMap.get(nextHop)
@@ -91,21 +94,17 @@ class Router(object):
                     senderprotoaddr = temp.ipaddr
                     request = create_ip_arp_request(senderhwaddr, senderprotoaddr, dstIpAddr)
                     self.net.send_packet(temp.name, request)
-            '''
-            If the packet is an Arp pkt, then use its ethernet mac as destination mac
-            for the IP packet's ethernet header 
-            '''
             else:
+            # The pkt is an arp pkt, then complete the header and forward the ip pkt
                 print("arp: ")
                 print(arp)
-                # Check if the IP/Ethernet pair is already in the map
                 if arp.senderhwaddr not in etherIpMap.keys():
                     etherHeader.dst = arp.senderhwaddr
                     #store the sender ip/ethernet map
                     etherIpMap[str(arp.senderprotoaddr)] = arp.senderhwaddr
 
                 if ipIntfMap[str(arp.targetprotoaddr)] is not None:
-                    pktToSend = pktsQueue.pop(0)
+                    pktToSend = pktsQueue.pop(0).packet
                     requestIntf = ipIntfMap[str(arp.targetprotoaddr)]
                     print(requestIntf)
                     etherHeader.src = requestIntf.ethaddr
