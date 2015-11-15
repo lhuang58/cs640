@@ -51,15 +51,20 @@ class Router(object):
         while True:
             gotpkt = True
             # Check the task queue, if there is one, process the task
+            print(taskQueue)
             if taskQueue:
                 waiting = []
                 for task in taskQueue:
                     if time.time() - task.time >= 1:
                         if task.retry < 5:
                             self.net.send_packet(task.interfaceName, task.request)
+                            task.time = time.time()
                             task.retry += 1
                             waiting.append(task)
+                    else:
+                        waiting.append(task)
                 taskQueue = waiting
+                
             try:
                 dev,pkt = self.net.recv_packet(timeout=1.0)
                 arp = pkt.get_header(Arp)
@@ -107,7 +112,6 @@ class Router(object):
                             self.net.send_packet(temp.name, request)
                             # add a new task to the queue
                             taskQueue.append(Task(pkt, time.time(), request, temp.name))
-                            print(time.time())
 
                 else:
                 # The pkt is an arp pkt, then complete the header and forward the ip pkt
@@ -121,6 +125,7 @@ class Router(object):
                                 etherHeader.dst = arp.senderhwaddr
                                 #store the sender ip/ethernet map
                                 etherIpMap[str(arp.senderprotoaddr)] = arp.senderhwaddr
+                            print(taskQueue)
                             pktToSend = taskQueue.pop(0).packet
                             etherHeader.src = requestIntf.ethaddr
                             pktToSend[0] = etherHeader
