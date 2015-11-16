@@ -65,7 +65,7 @@ class Router(object):
                             value.pop(0)
             # TODO:
             # Need to handle retry
-            
+
             try:
                 dev,pkt = self.net.recv_packet(timeout=1.0)
                 arp = pkt.get_header(Arp)
@@ -107,8 +107,6 @@ class Router(object):
                         if str(dstIpAddr) not in ipIntfMap.keys():
                             # Send the ARP request to the host where IP address need to be resovled
                             if etherIpMap.get(str(dstIpAddr)) is None:
-                                print("try to send request")
-                                print(pkt)
                                 temp = ipIntfMap.get(nextHop)
                                 senderhwaddr = temp.ethaddr
                                 senderprotoaddr = temp.ipaddr
@@ -135,8 +133,6 @@ class Router(object):
                 # if the arp pkt is an request, then send the reply
                     if ipIntfMap.get(str(arp.targetprotoaddr)) is not None:
                         requestIntf = ipIntfMap[str(arp.targetprotoaddr)]
-                        print("target ip")
-                        print(arp.targetprotoaddr)
                         if arp.operation == ArpOperation.Reply:
                             # If the dst is not in the map
                             # store the sender ip/ethernet pair
