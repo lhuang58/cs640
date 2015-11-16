@@ -47,7 +47,7 @@ class Router(object):
             ipIntfMap[str(intf.ipaddr)] = intf
             networkPrefix = IPv4Address(int(intf.ipaddr) & int(intf.netmask))
             forwardingTable.append([str(networkPrefix), str(intf.netmask), str(intf.ipaddr), intf.name])
-        print(forwardingTable)
+
         while True:
             gotpkt = True
             # Check the task queue, if there is one, process the task
@@ -55,16 +55,17 @@ class Router(object):
                 for key, value in taskQueue.items():
                     if time.time() - value[0].time >= 1:
                         if value[0].retry < 5:
-                            print("sending request")
-                            print(value[0].request)
+                            # Resend request only once
                             self.net.send_packet(value[0].interfaceName, value[0].request)
+                            # Update the time for all the packets
                             for task in value:
                                 task.time = time.time()
                             value[0].retry += 1
-                            print(value[0].retry)
                         else:
                             value.pop(0)
-            print(taskQueue)
+            # TODO:
+            # Need to handle retry
+            
             try:
                 dev,pkt = self.net.recv_packet(timeout=1.0)
                 arp = pkt.get_header(Arp)
@@ -113,17 +114,17 @@ class Router(object):
                                 senderprotoaddr = temp.ipaddr
                                 request = create_ip_arp_request(senderhwaddr, senderprotoaddr, dstIpAddr)
                                 # add a new task to the queue
+                                # If there is only one packet sending to that dst then send the request
                                 if str(dstIpAddr) not in taskQueue.keys():
                                     sameDstList = []
                                     sameDstList.append(Task(pkt, time.time(), request, temp.name))
                                     taskQueue[str(dstIpAddr)] = sameDstList
                                     self.net.send_packet(temp.name, request)
                                 else:
+                                    # If there is already another packet in the list, dont not send duplicate request
                                     taskQueue[str(dstIpAddr)].append(Task(pkt, time.time(), request, temp.name))
                             else:
-                                print("interface")
-                                print(ipIntfMap)
-                                print(str(dstIpAddr))
+                                # If the IP/ethernet map is already there, send the packet immediately
                                 forwardIntf = ipIntfMap.get(nextHop)
                                 pkt[Ethernet].src = forwardIntf.ethaddr
                                 pkt[Ethernet].dst = etherIpMap.get(str(dstIpAddr))
@@ -141,8 +142,8 @@ class Router(object):
                             # store the sender ip/ethernet pair
                             if etherIpMap.get(str(arp.senderprotoaddr)) is None:
                                 etherIpMap[str(arp.senderprotoaddr)] = arp.senderhwaddr
-
                             pktToSend = taskQueue.pop(str(arp.senderprotoaddr))
+                            # Once the reply received, send all the packets to that destination
                             for task in pktToSend:
                                 task.packet[Ethernet].src = requestIntf.ethaddr
                                 task.packet[Ethernet].dst = arp.senderhwaddr
