@@ -43,7 +43,6 @@ class Router(object):
 
         # Build the forwarding table from interfaces
         for intf in interfaces:
-            print(intf)
             ipIntfMap[str(intf.ipaddr)] = intf
             networkPrefix = IPv4Address(int(intf.ipaddr) & int(intf.netmask))
             forwardingTable.append([str(networkPrefix), str(intf.netmask), str(intf.ipaddr), intf.name])
@@ -64,7 +63,7 @@ class Router(object):
                     else:
                         waiting.append(task)
                 taskQueue = waiting
-                
+
             try:
                 dev,pkt = self.net.recv_packet(timeout=1.0)
                 arp = pkt.get_header(Arp)
@@ -105,6 +104,9 @@ class Router(object):
                     if nextHop is not None and str(dstIpAddr) not in ipIntfMap.keys():
                         # Send the ARP request to the host where IP address need to be resovled
                         if etherIpMap.get(str(dstIpAddr)) is None:
+                            print("try to send request")
+                            print(etherIpMap.get(str(dstIpAddr)))
+                            print(dstIpAddr)
                             temp = ipIntfMap.get(nextHop)
                             senderhwaddr = temp.ethaddr
                             senderprotoaddr = temp.ipaddr
@@ -112,20 +114,27 @@ class Router(object):
                             self.net.send_packet(temp.name, request)
                             # add a new task to the queue
                             taskQueue.append(Task(pkt, time.time(), request, temp.name))
+                        else:
+                            forwardIntf = ipIntfMap.get(str(dstIpAddr))
+                            etherHeader.src = forwardIntf.ethaddr
+                            etherHeader.dst = etherIpMap.get(str(dstIpAddr))
+                            pkt[0] = etherHeader
+                            self.net.send_packet(forwardIntf.name, pkt)
 
-                else:
+                if arp:
                 # The pkt is an arp pkt, then complete the header and forward the ip pkt
                 # if the arp pkt is an request, then send the reply
-                    print("arp: ")
-                    print(arp.targethwaddr)
                     if ipIntfMap.get(str(arp.targetprotoaddr)) is not None:
                         requestIntf = ipIntfMap[str(arp.targetprotoaddr)]
-                        if str(arp.targethwaddr) != "ff:ff:ff:ff:ff:ff":
-                            if arp.senderhwaddr not in etherIpMap.keys():
+                        print("arp packet target ethardrr")
+                        print(arp.operation)
+                        if arp.operation == ArpOperation.Reply:
+                            # If the dst is not in the map
+                            # store the sender ip/ethernet pair
+                            if etherIpMap.get(str(arp.senderprotoaddr)) is None:
                                 etherHeader.dst = arp.senderhwaddr
-                                #store the sender ip/ethernet map
                                 etherIpMap[str(arp.senderprotoaddr)] = arp.senderhwaddr
-                            print(taskQueue)
+
                             pktToSend = taskQueue.pop(0).packet
                             etherHeader.src = requestIntf.ethaddr
                             pktToSend[0] = etherHeader
