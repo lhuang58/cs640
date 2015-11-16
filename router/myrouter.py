@@ -143,8 +143,6 @@ class Router(object):
                             for task in pktToSend:
                                 task.packet[Ethernet].src = requestIntf.ethaddr
                                 task.packet[Ethernet].dst = arp.senderhwaddr
-                            # store receiver IP/Ethernet map
-                                etherIpMap[str(requestIntf.ipaddr)] = requestIntf.ethaddr
                                 self.net.send_packet(requestIntf.name, task.packet)
                         else:
                             if etherIpMap.get(str(arp.senderprotoaddr)) is None:
