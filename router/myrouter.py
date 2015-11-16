@@ -30,7 +30,7 @@ class Router(object):
         packets until the end of time.
         '''
         interfaces = self.net.interfaces()
-        taskQueue = []
+        taskQueue = {}
         forwardingTable = []
         f = open('forwarding_table.txt', 'r')
         # Build the forwarding table from file
@@ -52,23 +52,19 @@ class Router(object):
             gotpkt = True
             # Check the task queue, if there is one, process the task
             if taskQueue:
-                waiting = []
-                for task in taskQueue:
-                    if time.time() - task.time >= 1:
-                        if task.retry < 5:
+                for key, value in taskQueue.items():
+                    if time.time() - value[0].time >= 1:
+                        if value[0].retry < 5:
                             print("sending request")
-                            print(task.request)
-                            self.net.send_packet(task.interfaceName, task.request)
-                            task.time = time.time()
-                            task.retry += 1
-                            print(task.retry)
-                            waiting.append(task)
-                    else:
-                        waiting.append(task)
-                del taskQueue[:]
-                for temp in waiting:
-                    taskQueue.append(temp)
-
+                            print(value[0].request)
+                            self.net.send_packet(value[0].interfaceName, value[0].request)
+                            for task in value:
+                                task.time = time.time()
+                            value[0].retry += 1
+                            print(value[0].retry)
+                        else:
+                            value.pop(0)
+            print(taskQueue)
             try:
                 dev,pkt = self.net.recv_packet(timeout=1.0)
                 arp = pkt.get_header(Arp)
@@ -106,51 +102,57 @@ class Router(object):
                             nextHop = entry[2]
                     # If there is a match for this and the destination address is not
                     # one of addresses in router's interfaces, then send the request for destination host
-                    if nextHop is not None and str(dstIpAddr) not in ipIntfMap.keys():
-                        # Send the ARP request to the host where IP address need to be resovled
-                        if etherIpMap.get(str(dstIpAddr)) is None:
-                            print("try to send request")
-                            print(pkt)
-                            temp = ipIntfMap.get(nextHop)
-                            senderhwaddr = temp.ethaddr
-                            senderprotoaddr = temp.ipaddr
-                            request = create_ip_arp_request(senderhwaddr, senderprotoaddr, dstIpAddr)
-                            contain = False;
-                            for task in taskQueue:
-                                contain = str(pkt[0].dst) == str(task.packet[0].dst) and str(task.packet[0].src) == str(pkt[0].src)
-                            if not contain:
-                                self.net.send_packet(temp.name, request)
-                            # add a new task to the queue
-                            taskQueue.append(Task(pkt, time.time(), request, temp.name))
-                        else:
-                            forwardIntf = ipIntfMap.get(str(dstIpAddr))
-                            pkt[Ethernet].src = forwardIntf.ethaddr
-                            pkt[Ethernet].dst = etherIpMap.get(str(dstIpAddr))
-                            self.net.send_packet(forwardIntf.name, pkt)
+                    if nextHop is not None:
+                        if str(dstIpAddr) not in ipIntfMap.keys():
+                            # Send the ARP request to the host where IP address need to be resovled
+                            if etherIpMap.get(str(dstIpAddr)) is None:
+                                print("try to send request")
+                                print(pkt)
+                                temp = ipIntfMap.get(nextHop)
+                                senderhwaddr = temp.ethaddr
+                                senderprotoaddr = temp.ipaddr
+                                request = create_ip_arp_request(senderhwaddr, senderprotoaddr, dstIpAddr)
+                                # add a new task to the queue
+                                if str(dstIpAddr) not in taskQueue.keys():
+                                    sameDstList = []
+                                    sameDstList.append(Task(pkt, time.time(), request, temp.name))
+                                    taskQueue[str(dstIpAddr)] = sameDstList
+                                    self.net.send_packet(temp.name, request)
+                                else:
+                                    taskQueue[str(dstIpAddr)].append(Task(pkt, time.time(), request, temp.name))
+                            else:
+                                print("interface")
+                                print(ipIntfMap)
+                                print(str(dstIpAddr))
+                                forwardIntf = ipIntfMap.get(nextHop)
+                                pkt[Ethernet].src = forwardIntf.ethaddr
+                                pkt[Ethernet].dst = etherIpMap.get(str(dstIpAddr))
+                                self.net.send_packet(forwardIntf.name, pkt)
 
                 else:
                 # The pkt is an arp pkt, then complete the header and forward the ip pkt
                 # if the arp pkt is an request, then send the reply
                     if ipIntfMap.get(str(arp.targetprotoaddr)) is not None:
                         requestIntf = ipIntfMap[str(arp.targetprotoaddr)]
+                        print("target ip")
+                        print(arp.targetprotoaddr)
                         if arp.operation == ArpOperation.Reply:
                             # If the dst is not in the map
                             # store the sender ip/ethernet pair
                             if etherIpMap.get(str(arp.senderprotoaddr)) is None:
                                 etherIpMap[str(arp.senderprotoaddr)] = arp.senderhwaddr
 
-                            pktToSend = taskQueue.pop(0).packet
-                            pktToSend[Ethernet].src = requestIntf.ethaddr
-                            pktToSend[Ethernet].dst = arp.senderhwaddr
+                            pktToSend = taskQueue.pop(str(arp.senderprotoaddr))
+                            for task in pktToSend:
+                                task.packet[Ethernet].src = requestIntf.ethaddr
+                                task.packet[Ethernet].dst = arp.senderhwaddr
                             # store receiver IP/Ethernet map
-                            etherIpMap[str(requestIntf.ipaddr)] = requestIntf.ethaddr
-                            self.net.send_packet(requestIntf.name, pktToSend)
+                                etherIpMap[str(requestIntf.ipaddr)] = requestIntf.ethaddr
+                                self.net.send_packet(requestIntf.name, task.packet)
                         else:
                             if etherIpMap.get(str(arp.senderprotoaddr)) is None:
                                 etherIpMap[str(arp.senderprotoaddr)] = arp.senderhwaddr
                             arpReply = create_ip_arp_reply(requestIntf.ethaddr, arp.senderhwaddr, requestIntf.ipaddr, arp.senderprotoaddr)
-                            print("sending response")
-                            print(arpReply)
                             self.net.send_packet(requestIntf.name, arpReply)
 
 def switchy_main(net):
